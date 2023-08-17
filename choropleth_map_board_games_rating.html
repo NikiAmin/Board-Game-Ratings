@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+
+<head>
+    <!-- title -->
+    <title>Choropleth maps</title>
+
+    <!-- importing required libraries -->
+    <meta charset="utf-8">
+
+    <script type="text/javascript" src="lib/d3.v5.min.js" charset="'utf=8"></script>
+    <script type="text/javascript" src="lib/d3.v5.min.js"></script>
+    <script type="text/javascript" src="lib/d3-dsv.min.js"></script>
+    <script type="text/javascript" src="lib/d3-geo-projection.v2.min.js"></script>
+    <script type="text/javascript" src="lib/d3-tip.min.js"></script>
+    <script type="text/javascript" src="lib/d3-legend.min.js"></script>
+    <script type="text/javascript" src="lib/topojson.v2.min.js"></script>
+    <style>
+
+    </style>
+
+    <title></title>
+</head>
+
+
+<body>
+    <!-- Heading for the visualization -->
+    <h1>Choropleth Map for boardgames</h1>
+
+
+    <!-- Dropdown element -->
+    <label for="gameDropdown">Select board game:</label>
+    <select name="List_boardgames" id="gameDropdown"></select>
+
+    <script>
+
+        // Margin and dimensions for svg
+        var margin = { top: 50, right: 50, bottom: 50, left: 50 };
+        var width = 1560 - margin.left - margin.right;
+        var height = 1000 - margin.top - margin.bottom;
+
+        // Creating svg
+        var svg = d3.select("body").append("svg")
+            .attr("id", "choropleth")
+            .attr("width", width + margin.right + margin.left)
+            .attr("height", height + margin.top + margin.bottom)
+            // .append("g")
+            // .attr("id", "countries")
+            .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+        // Color scale
+        colors = ['#fff7bc', '#ffeda0', '#fec44f', '#d95f0e'];
+
+
+        var tooltip = d3.tip()
+            .attr('class', 'd3tooltip')
+            .attr("id", "tooltip");
+
+        // Projection and path for Choropleth
+        var projection = d3.geoNaturalEarth()
+            .center([0, 0])
+            .translate([width / 3, height / 3]);
+        // .translate([2 * width - 160, 2 * height]);
+        var path = d3.geoPath()
+            .projection(projection);
+
+
+        // Global variables 
+        var gameData = d3.dsv(",", "ratings-by-country.csv");
+        var world = d3.json("world_countries.json");
+
+        // console.log(gameData);
+
+        Promise.all([
+            // read files
+            d3.json("world_countries.json"),
+            d3.dsv(",", "ratings-by-country.csv", function (d) {
+                return {
+                    game: d['Game'],
+                    country: d['Country'],
+                    n_users: d['Number of Users'],
+                    avg_rating: d['Average Rating']
+                }
+
+            })
+
+
+        ]).then((values) => {
+
+            // Calling ready() with required arguments
+            world = values[0];
+            gameData = values[1];
+            // console.log(gameData);
+            error = "Not working";
+            // console.log(gameData)
+
+            //testing
+            // game_avgr_values = gameData.map(item => { return item.avg_rating });
+            // console.log(game_avgr_values);
+            // console.log(gameData[0]);
+
+            ready(error, world, gameData)
+        });
+
+        //calling function after reading the data from files
+
+        function ready(error, world, gameData) {
+            // extract all unique games from gameData
+            game_list = gameData.map(item => item.game)
+                .filter((value, index, self) => self.indexOf(value) === index)
+            sorted_games = game_list.sort();
+
+            // append the game options to the dropdown
+            var select_g = document.getElementById("gameDropdown");
+            for (index in sorted_games) {
+                select_g.options[select_g.options.length] = new Option(sorted_games[index], sorted_games[index]);
+            }
+
+            // event listener for the dropdown. Update to choropleth and legend when selection changes
+            d3.select('#gameDropdown').on('change', function (a) {
+                // console.log(a)
+                selectedGame = d3.select(this).property('value');
+
+                createMapAndLegend(world, gameData, selectedGame);
+            });
+
+            //Choropleth with default option.
+            createMapAndLegend(world, gameData, '6 nimmt!');
+
+
+        }
+
+        // Create a Choropleth and legend + update when selection changes
+        function createMapAndLegend(world, gameData, selectedGame) {
+            // currentKey = d3.select(this).property('value');
+            // currentKey = selectedGame;
+            updated_games_list = gameData.filter(function (game) {
+                // console.log(game.game);
+                return game.game == selectedGame;
+            });
+
+
+            country_list = updated_games_list.map(function (d) {
+                return d.country
+            });
+
+            idCountries = [];
+
+            for (var i = 0; i < world.features.length; i++) {
+                c_n = world.features[i].properties['name'];
+                if (country_list.indexOf(c_n) !== -1) {
+                    idCountries.push(world.features[i]);
+
+                }
+            };
+
+            // getting avg rating values range for a selectedgame
+            game_avgr_values = [];
+            country_value = [];
+            for (var i = 0; i < gameData.length; i++) {
+                if (gameData[i].game == selectedGame) {
+                    game_avgr_values.push(Number(gameData[i].avg_rating))
+                    country_value.push(gameData[i].country)
+                };
+            };
+
+            //dictionary with 2 arrays
+            country_game_dict = {};
+            country_value.forEach((key, i) => country_game_dict[key] = game_avgr_values[i])
+            console.log(country_game_dict);
+
+            game_avgr_values = game_avgr_values.sort(function (a, b) { return a - b; });
+            // console.log(game_avgr_values);
+
+            //Range 
+            minAvgr = d3.min(game_avgr_values);
+            maxAvgr = d3.max(game_avgr_values);
+            // range_step = (maxAvgr - minAvgr) / 4;
+            // avgr_range = d3.range(minAvgr, maxAvgr, range_step);
+
+            zero_q = d3.quantile(game_avgr_values, 0);
+            first_q = d3.quantile(game_avgr_values, 0.25);
+            second_q = d3.quantile(game_avgr_values, 0.5);
+            third_q = d3.quantile(game_avgr_values, 0.75);
+            fourth_q = d3.quantile(game_avgr_values, 1);
+
+            // console.log(zero_q)
+            // console.log(first_q);
+            // console.log(second_q);
+            // console.log(third_q);
+            // console.log(fourth_q);
+
+            // var color_scale = d3.scaleQuantile()
+            //     .domain(avgr_range)
+            //     .range(colors);
+
+            new_avgr_list = [];
+            new_avgr_list.push(zero_q, first_q, second_q, third_q, fourth_q);
+            // new_avgr_list = avgr_range.concat(maxAvgr)
+            // // new_avgr_list.add(maxAvgr)
+            // console.log(avgr_range)
+            // console.log(new_avgr_list)
+
+            avgr_range = [];
+            avgr_range.push(zero_q, first_q, second_q, third_q);
+
+            // console.log(avgr_range);
+            // console.log(new_avgr_list)
+
+            var color_scale = d3.scaleQuantile()
+                .domain(new_avgr_list)
+                .range(colors);
+
+
+            ////////// color function ////////
+            function get_color(country_game_dict, w_fts, new_avgr_list, colors) {
+                // for (var i = 0; i < w_fts.length; i++) {
+                c_n = w_fts.properties['name'];
+                // const hasKey = c_n in country_game_dict;
+                console.log(c_n)
+
+                if (c_n in country_game_dict) {
+                    avg_r = country_game_dict[c_n];
+                    if (avg_r <= new_avgr_list[1]) {
+                        return colors[0];
+                    }
+
+                    else if (avg_r > new_avgr_list[1] && avg_r <= new_avgr_list[2]) {
+                        return colors[1];
+                    }
+                    else if (avg_r > new_avgr_list[2] && avg_r <= new_avgr_list[3]) {
+                        return colors[2];
+                    }
+                    else if (avg_r > new_avgr_list[3] && avg_r <= new_avgr_list[4]) {
+                        return colors[3];
+                    };
+                }
+                // }
+                return '#ccc';
+            };
+
+
+            console.log(world.features)
+
+            //Tooltip
+            tooltip.html(function (d) {
+                // console.log(d)
+                var tipt = "";
+                tipt += "Country: " + d.properties.name + '<br >';
+                // console.log(tipt)
+                tipt += "Game: " + selectedGame + '<br >';
+                tipt += "Avg Rating: " + getGameRating(d.properties.name, selectedGame) + '<br >';
+                // console.log(d.properties.name)
+                tipt += "Number of Users: " + getNumUsers(d.properties.name, selectedGame) + '<br/>';
+                return tipt;
+            })
+
+            svg.call(tooltip);
+
+            d3.selectAll("svg>*").remove();
+            svg.append("g")
+                .attr("id", "countries")
+                .selectAll("path")
+                .data(world.features)
+                .enter()
+                .append("path")
+                // .attr("fill", colors)
+                .attr("fill", function (d, i) {
+                    return get_color(country_game_dict, world.features[i], new_avgr_list, colors)
+                })
+                // .attr('fill', function (d) {
+                //     return color_scale(game_avgr_values);
+                // })
+                .attr("stroke", "white")
+                .attr("d", path)
+                .on("mouseover", tooltip.show)
+                .on("mouseout", tooltip.hide);
+
+            console.log(idCountries);
+
+            //legend
+            var x = 40;
+            var y = x / 2;
+            var formatter = d3.format(",.2f");
+
+
+            var legend = svg.append('g')
+                // .attr('class', 'legend')
+                .attr('id', 'legend')
+            // .attr("x", function (d, i) { return 600 + x; })
+            // .attr("y", 550)
+            // .attr("width", x)
+            // .attr("height", y);
+
+            legend.selectAll('g').data(avgr_range)
+                .enter()
+                // .append('g')
+                // .each(function (d, i) {
+                // var g = d3.select(this);
+                .append('rect')
+                .attr("x", function (d, i) { return 650 + x; })
+                .attr("y", 565)
+                .attr("width", x)
+                .attr("height", y)
+                .attr("transform", function (d, i) {
+                    {
+                        return "translate(0," + i * 20 + ")"
+                    }
+                })
+                .style("fill", function (d, i) { return colors[i]; });
+
+            legend.selectAll('g').data(avgr_range)
+                .enter()
+                .append("text")
+                // .attr('id', 'legend')
+                .attr("x", function (d, i) { return 700 + x; })
+                .attr("y", 580)
+                // .attr("width", x)
+                // .attr("height", y)
+                .attr("transform", function (d, i) {
+                    {
+                        return "translate(0," + i * 20 + ")"
+                    }
+                })
+                .text(function (d, i) { return formatter(new_avgr_list[i]).toString() + " to " + formatter(new_avgr_list[i + 1]).toString(); })
+                // .attr("class", "legend")
+                .style('stroke', 'black')
+                .attr("text-anchor", "left")
+                .style("alignment-baseline", "middle")
+                ;
+
+            /* Adding name */
+            svg.append("text")
+                .attr("x", 600)
+                .attr("y", 565)
+                .attr("text-anchor", "middle")
+                .attr("id", "credit")
+                .text("NikiAmin");
+            // });
+
+            function getGameRating(countryName, selectedGame) {
+                for (var i = 0; i < gameData.length; i++) {
+                    if (gameData[i].country === countryName && gameData[i].game === selectedGame) {
+                        return gameData[i].avg_rating
+                    }
+
+
+                };
+                return 'N/A';
+            };
+
+            function getNumUsers(countryName, selectedGame) {
+                // let result;
+                for (var i = 0; i < gameData.length; i++) {
+                    // let result;
+                    if (gameData[i].country === countryName && gameData[i].game === selectedGame) { //} && typeof gameData[i].n_users === 'string') {
+                        return gameData[i].n_users;
+
+                    }
+
+
+                }
+                return 'N/A';
+
+
+            };
+
+        };
+    </script>
+
+</body>
+
+</html>
